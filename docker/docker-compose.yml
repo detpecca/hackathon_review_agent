@@ -1,0 +1,292 @@
+version: "3.9"
+
+services:
+  # ============================================================
+  # FastAPI 主服务
+  # ============================================================
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: hackathon-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://hackathon:hackathon_pass@db:5432/hackathon_db
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=hackathon_minio
+      - MINIO_SECRET_KEY=hackathon_minio_secret
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - SANDBOX_DOCKER_HOST=tcp://dind:2375
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ENV=production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      dind:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - hackathon-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # ============================================================
+  # Celery Worker - 主评审
+  # ============================================================
+  celery-worker-review:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: hackathon-worker-review
+    environment:
+      - DATABASE_URL=postgresql://hackathon:hackathon_pass@db:5432/hackathon_db
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=hackathon_minio
+      - MINIO_SECRET_KEY=hackathon_minio_secret
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - SANDBOX_DOCKER_HOST=tcp://dind:2375
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - WORKER_TYPE=review
+      - CONCURRENCY=3
+    depends_on:
+      - db
+      - redis
+      - minio
+      - dind
+    volumes:
+      - uploads_data:/app/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hackathon-net
+    command: celery -A src.celery_app worker -Q review -l info --concurrency=3 -n review@%h
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+  # ============================================================
+  # Celery Worker - 沙箱执行（独立队列，资源隔离）
+  # ============================================================
+  celery-worker-sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: hackathon-worker-sandbox
+    privileged: true  # Required for Docker-in-Docker
+    environment:
+      - DATABASE_URL=postgresql://hackathon:hackathon_pass@db:5432/hackathon_db
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=hackathon_minio
+      - MINIO_SECRET_KEY=hackathon_minio_secret
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - SANDBOX_DOCKER_HOST=unix:///var/run/docker.sock
+      - WORKER_TYPE=sandbox
+      - CONCURRENCY=5
+    depends_on:
+      - db
+      - redis
+      - minio
+    volumes:
+      - uploads_data:/app/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hackathon-net
+    command: celery -A src.celery_app worker -Q sandbox -l info --concurrency=5 -n sandbox@%h
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+
+  # ============================================================
+  # Celery Worker - 报告生成
+  # ============================================================
+  celery-worker-report:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: hackathon-worker-report
+    environment:
+      - DATABASE_URL=postgresql://hackathon:hackathon_pass@db:5432/hackathon_db
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=hackathon_minio
+      - MINIO_SECRET_KEY=hackathon_minio_secret
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WORKER_TYPE=report
+      - CONCURRENCY=2
+    depends_on:
+      - db
+      - redis
+      - minio
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - hackathon-net
+    command: celery -A src.celery_app worker -Q report -l info --concurrency=2 -n report@%h
+    restart: unless-stopped
+
+  # ============================================================
+  # Celery Beat - 定时任务调度
+  # ============================================================
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: hackathon-beat
+    environment:
+      - DATABASE_URL=postgresql://hackathon:hackathon_pass@db:5432/hackathon_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - redis
+    networks:
+      - hackathon-net
+    command: celery -A src.celery_app beat -l info
+    restart: unless-stopped
+
+  # ============================================================
+  # Docker-in-Docker (沙箱容器运行环境)
+  # ============================================================
+  dind:
+    image: docker:25-dind
+    container_name: hackathon-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    volumes:
+      - dind_data:/var/lib/docker
+    networks:
+      - hackathon-net
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ============================================================
+  # PostgreSQL 数据库
+  # ============================================================
+  db:
+    image: postgres:16-alpine
+    container_name: hackathon-db
+    environment:
+      - POSTGRES_USER=hackathon
+      - POSTGRES_PASSWORD=hackathon_pass
+      - POSTGRES_DB=hackathon_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - hackathon-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hackathon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============================================================
+  # Redis 缓存 + 消息队列
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: hackathon-redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - hackathon-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================================
+  # MinIO 对象存储
+  # ============================================================
+  minio:
+    image: minio/minio:latest
+    container_name: hackathon-minio
+    environment:
+      - MINIO_ROOT_USER=hackathon_minio
+      - MINIO_ROOT_PASSWORD=hackathon_minio_secret
+      - MINIO_DEFAULT_BUCKETS=submissions,reports
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - hackathon-net
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============================================================
+  # 前端管理后台 (nginx + 静态文件 + API 反向代理)
+  # ============================================================
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: hackathon-frontend
+    ports:
+      - "4399:80"
+    depends_on:
+      - api
+    networks:
+      - hackathon-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  dind_data:
+  uploads_data:
+
+networks:
+  hackathon-net:
+    driver: bridge

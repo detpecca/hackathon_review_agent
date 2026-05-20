@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//c/Users/李廷/.claude/**)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/vercel-labs/skills/main/skills/find-skills/find-skills.ts\")",
+      "Bash(curl -sL \"https://api.github.com/repos/vercel-labs/skills/contents/skills/find-skills\")",
+      "Bash(npx skills *)",
+      "Bash(docker compose *)",
+      "Bash(docker-compose version *)",
+      "Bash(docker exec hackathon-db *)",
+      "Bash(docker exec hackathon-redis *)",
+      "Bash(docker exec *)",
+      "Bash(python *)",
+      "Bash(python3 -c \"from src.config.settings import get_settings; s = get_settings\\(\\); print\\(f'App: {s.app_name}'\\)\")",
+      "Bash(py -c \"from src.config.settings import get_settings; s = get_settings\\(\\); print\\(f'App: {s.app_name}'\\)\")",
+      "Bash(docker build *)",
+      "Read(//d/anaconda3/**)",
+      "Bash(/d/anaconda3/python.exe --version)",
+      "Bash(/d/anaconda3/Scripts/pip install *)",
+      "Bash(docker pull *)",
+      "Bash(docker run *)",
+      "Bash(docker network ls *)",
+      "Bash(docker rm *)",
+      "Bash(curl -s http://localhost:8000/api/v1/health)",
+      "Bash(curl -s http://localhost:8000/api/v1/questions)",
+      "Bash(curl *)",
+      "Bash(mkdir -p /tmp/test_project)",
+      "Bash(echo '# Test Project *)",
+      "Bash(echo 'print\\(\"Hello Hackathon!\"\\)')",
+      "Bash(zip -r /tmp/test_submission.zip .)",
+      "Bash(/d/anaconda3/python.exe *)",
+      "Read(//d/tmp/**)",
+      "Read(//c/tmp/**)",
+      "Bash(git init *)"
+    ]
+  }
+}

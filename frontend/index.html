@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Hackathon 智能评审系统</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- 侧边导航 -->
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <span class="logo">◆</span>
+                <span class="brand-text">Hackathon<br><small>智能评审</small></span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#dashboard" class="nav-link active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>概览
+                </a></li>
+                <li><a href="#teams" class="nav-link" data-page="teams">
+                    <span class="nav-icon">👥</span>队伍
+                </a></li>
+                <li><a href="#submit" class="nav-link" data-page="submit">
+                    <span class="nav-icon">📤</span>提交作品
+                </a></li>
+                <li><a href="#leaderboard" class="nav-link" data-page="leaderboard">
+                    <span class="nav-icon">🏆</span>排行榜
+                </a></li>
+                <li><a href="#submissions" class="nav-link" data-page="submissions">
+                    <span class="nav-icon">📋</span>作品列表
+                </a></li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="status-dot"></div>
+                <span id="system-status">系统正常</span>
+            </div>
+        </nav>
+
+        <!-- 主内容区 -->
+        <main class="main">
+            <!-- 顶部栏 -->
+            <header class="header">
+                <h1 id="page-title">Dashboard</h1>
+                <div class="header-actions">
+                    <span class="version">v1.0.0</span>
+                </div>
+            </header>
+
+            <!-- 页面内容容器 -->
+            <div class="content" id="content">
+                <!-- 动态加载 -->
+            </div>
+        </main>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title">详情</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

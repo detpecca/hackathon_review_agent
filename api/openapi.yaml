@@ -1,0 +1,740 @@
+openapi: 3.1.0
+info:
+  title: AI Hackathon 2026 智能评审Agent系统 API
+  description: |
+    为AI编程大赛提供自动化的作品提交、评审任务调度、评分结果查询和排行榜服务。
+    所有时间戳字段使用ISO 8601格式。
+  version: 1.0.0
+  contact:
+    name: Hackathon Tech Team
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Development
+  - url: https://hackathon2026.example.com/api/v1
+    description: Production
+
+paths:
+  # ============================================================
+  # 队伍管理
+  # ============================================================
+  /teams:
+    post:
+      summary: 注册参赛队伍
+      operationId: createTeam
+      tags: [Teams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamCreate'
+      responses:
+        '201':
+          description: 队伍创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '400':
+          description: 参数校验失败
+
+    get:
+      summary: 获取队伍列表
+      operationId: listTeams
+      tags: [Teams]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 队伍列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTeams'
+
+  /teams/{team_id}:
+    get:
+      summary: 获取队伍详情
+      operationId: getTeam
+      tags: [Teams]
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 队伍详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamWithSubmissions'
+
+  # ============================================================
+  # 赛题管理
+  # ============================================================
+  /questions:
+    get:
+      summary: 获取所有赛题
+      operationId: listQuestions
+      tags: [Questions]
+      responses:
+        '200':
+          description: 赛题列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Question'
+
+  /questions/{question_id}:
+    get:
+      summary: 获取赛题详情
+      operationId: getQuestion
+      tags: [Questions]
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 赛题详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionDetail'
+
+  # ============================================================
+  # 作品提交（核心）
+  # ============================================================
+  /submissions:
+    post:
+      summary: 提交参赛作品（Multipart文件上传）
+      operationId: createSubmission
+      tags: [Submissions]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [team_id, question_id, file]
+              properties:
+                team_id:
+                  type: string
+                  format: uuid
+                  description: 队伍ID
+                question_id:
+                  type: integer
+                  description: 赛题编号(1-7)
+                file:
+                  type: string
+                  format: binary
+                  description: 作品ZIP/TAR.GZ文件，最大500MB
+                description:
+                  type: string
+                  description: 作品说明（可选）
+      responses:
+        '201':
+          description: 提交成功，评审任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+        '400':
+          description: 文件格式错误或参数无效
+        '413':
+          description: 文件过大
+
+    get:
+      summary: 查询提交列表（支持过滤）
+      operationId: listSubmissions
+      tags: [Submissions]
+      parameters:
+        - name: team_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: question_id
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed]
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 提交列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSubmissions'
+
+  /submissions/{submission_id}:
+    get:
+      summary: 获取作品详情及评审状态
+      operationId: getSubmission
+      tags: [Submissions]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 作品详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionDetail'
+
+  /submissions/{submission_id}/retry:
+    post:
+      summary: 重新触发评审（用于失败或手动重试）
+      operationId: retrySubmissionReview
+      tags: [Submissions]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: 评审任务已重新提交
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewTask'
+
+  # ============================================================
+  # 评审结果查询
+  # ============================================================
+  /submissions/{submission_id}/scores:
+    get:
+      summary: 获取作品的各维度评分
+      operationId: getDimensionScores
+      tags: [Scores]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 各维度评分详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DimensionScores'
+
+  /submissions/{submission_id}/report:
+    get:
+      summary: 获取评审报告（Markdown或PDF）
+      operationId: getReviewReport
+      tags: [Scores]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [markdown, pdf, json]
+            default: markdown
+      responses:
+        '200':
+          description: 评审报告
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewReport'
+            text/markdown:
+              schema: { type: string }
+            application/pdf:
+              schema: { type: string, format: binary }
+
+  /submissions/{submission_id}/verification:
+    get:
+      summary: 获取Verifier交叉验证结果
+      operationId: getVerificationResults
+      tags: [Scores]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 验证结果
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VerificationResult'
+
+  # ============================================================
+  # 排行榜
+  # ============================================================
+  /leaderboard:
+    get:
+      summary: 获取赛题排行榜
+      operationId: getLeaderboard
+      tags: [Leaderboard]
+      parameters:
+        - name: question_id
+          in: query
+          schema: { type: integer }
+          description: 不填则返回总分榜
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: 排行榜数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Leaderboard'
+
+  # ============================================================
+  # 人工复核接口（评委专用）
+  # ============================================================
+  /human-reviews/pending:
+    get:
+      summary: 获取待人工复核的作品列表
+      operationId: listPendingHumanReviews
+      tags: [Human Review]
+      parameters:
+        - name: question_id
+          in: query
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+      responses:
+        '200':
+          description: 待复核列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSubmissions'
+
+  /human-reviews/{submission_id}:
+    post:
+      summary: 提交人工复核评分
+      operationId: submitHumanReview
+      tags: [Human Review]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HumanReviewInput'
+      responses:
+        '200':
+          description: 复核提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanReviewResult'
+
+  /human-reviews/{submission_id}/materials:
+    get:
+      summary: 获取评委复核工作台所需的所有材料
+      operationId: getReviewMaterials
+      tags: [Human Review]
+      parameters:
+        - name: submission_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 复核材料包
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewMaterials'
+
+  # ============================================================
+  # 系统监控与管理
+  # ============================================================
+  /health:
+    get:
+      summary: 健康检查
+      operationId: healthCheck
+      tags: [System]
+      responses:
+        '200':
+          description: 系统健康状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /tasks/stats:
+    get:
+      summary: 获取评审任务队列统计
+      operationId: getTaskStats
+      tags: [System]
+      responses:
+        '200':
+          description: 任务统计
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStats'
+
+  /tasks/{task_id}:
+    get:
+      summary: 查询评审任务状态
+      operationId: getTaskStatus
+      tags: [System]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewTask'
+
+components:
+  schemas:
+    # -----------------------------------------------------------
+    # 基础类型
+    # -----------------------------------------------------------
+    TeamCreate:
+      type: object
+      required: [team_code, team_name]
+      properties:
+        team_code:
+          type: string
+          example: "T001"
+        team_name:
+          type: string
+          example: "Code Masters"
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              role: { type: string }
+              email: { type: string, format: email }
+        contact_email:
+          type: string
+          format: email
+
+    Team:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        team_code: { type: string }
+        team_name: { type: string }
+        members: { type: array }
+        contact_email: { type: string }
+        created_at: { type: string, format: date-time }
+
+    TeamWithSubmissions:
+      allOf:
+        - $ref: '#/components/schemas/Team'
+        - type: object
+          properties:
+            submissions:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubmissionResponse'
+
+    PaginatedTeams:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Team'
+
+    Question:
+      type: object
+      properties:
+        id: { type: integer }
+        question_code: { type: string, example: "Q1" }
+        title: { type: string }
+        max_score: { type: integer, example: 150 }
+        category: { type: string, enum: [functional, agent, system] }
+        evaluation_weights:
+          type: object
+          additionalProperties: { type: number }
+          example:
+            functionality: 0.30
+            code_quality: 0.20
+            architecture: 0.15
+
+    QuestionDetail:
+      allOf:
+        - $ref: '#/components/schemas/Question'
+        - type: object
+          properties:
+            description: { type: string }
+            baseline_description: { type: string }
+            test_cases_config: { type: object }
+
+    SubmissionResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        team_id: { type: string, format: uuid }
+        question_id: { type: integer }
+        submission_version: { type: integer }
+        file_path: { type: string }
+        file_size: { type: integer }
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        submitted_at: { type: string, format: date-time }
+        review_task_id: { type: string, format: uuid, nullable: true }
+        estimated_completion: { type: string, format: date-time, nullable: true }
+
+    PaginatedSubmissions:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionResponse'
+
+    SubmissionDetail:
+      allOf:
+        - $ref: '#/components/schemas/SubmissionResponse'
+        - type: object
+          properties:
+            metadata:
+              type: object
+              description: "解析出的项目元数据"
+            completed_at: { type: string, format: date-time, nullable: true }
+            final_score:
+              type: object
+              nullable: true
+              properties:
+                total_score: { type: number }
+                confidence: { type: number }
+                human_review_required: { type: boolean }
+                human_reviewed: { type: boolean }
+            tasks:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReviewTask'
+
+    ReviewTask:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        submission_id: { type: string, format: uuid }
+        task_type:
+          type: string
+          enum: [full_review, sandbox_test, llm_review]
+        status:
+          type: string
+          enum: [pending, running, success, failure, retry]
+        started_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+        error_message: { type: string, nullable: true }
+
+    DimensionScores:
+      type: object
+      properties:
+        submission_id: { type: string, format: uuid }
+        scores:
+          type: array
+          items:
+            type: object
+            properties:
+              dimension: { type: string }
+              score: { type: integer, minimum: 0, maximum: 100 }
+              confidence: { type: number, minimum: 0, maximum: 1 }
+              reasoning: { type: string }
+              strengths: { type: array, items: { type: string } }
+              weaknesses: { type: array, items: { type: string } }
+              improvements: { type: array, items: { type: string } }
+              llm_model: { type: string }
+              scored_at: { type: string, format: date-time }
+        total_score: { type: number }
+        overall_confidence: { type: number }
+
+    VerificationResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        verifier_model: { type: string }
+        target_dimension: { type: string }
+        original_score: { type: integer }
+        verified_score: { type: integer }
+        deviation: { type: number }
+        confidence: { type: number }
+        needs_human_review: { type: boolean }
+        verification_reason: { type: string }
+        created_at: { type: string, format: date-time }
+
+    ReviewReport:
+      type: object
+      properties:
+        submission_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, generating, completed] }
+        content: { type: string, description: "Markdown格式报告" }
+        download_url: { type: string, format: uri }
+        generated_at: { type: string, format: date-time }
+
+    HumanReviewInput:
+      type: object
+      required: [reviewer_name, adjusted_scores]
+      properties:
+        reviewer_name: { type: string }
+        adjusted_scores:
+          type: object
+          additionalProperties: { type: integer, minimum: 0, maximum: 100 }
+          example:
+            functionality: 85
+            code_quality: 78
+        adjustment_reason: { type: string }
+        reviewer_notes: { type: string }
+
+    HumanReviewResult:
+      type: object
+      properties:
+        submission_id: { type: string, format: uuid }
+        reviewer_name: { type: string }
+        original_total: { type: number }
+        adjusted_total: { type: number }
+        finalized: { type: boolean }
+        reviewed_at: { type: string, format: date-time }
+
+    ReviewMaterials:
+      type: object
+      properties:
+        submission_id: { type: string, format: uuid }
+        project_files:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              size: { type: integer }
+              language: { type: string }
+        readme_content: { type: string }
+        test_results: { type: object }
+        agent_scores:
+          type: array
+          items:
+            $ref: '#/components/schemas/DimensionScores/properties/scores/items'
+        verification_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/VerificationResult'
+        sandbox_logs:
+          type: array
+          items:
+            type: object
+            properties:
+              execution_type: { type: string }
+              exit_code: { type: integer }
+              stdout: { type: string }
+              stderr: { type: string }
+        code_preview:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              content: { type: string }
+              language: { type: string }
+
+    Leaderboard:
+      type: object
+      properties:
+        question_id: { type: integer, nullable: true }
+        question_title: { type: string, nullable: true }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              rank: { type: integer }
+              team_id: { type: string, format: uuid }
+              team_code: { type: string }
+              team_name: { type: string }
+              total_score: { type: number }
+              confidence: { type: number }
+              human_reviewed: { type: boolean }
+              scored_at: { type: string, format: date-time }
+
+    HealthStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+        version: { type: string }
+        components:
+          type: object
+          properties:
+            database: { type: string, enum: [ok, error] }
+            redis: { type: string, enum: [ok, error] }
+            minio: { type: string, enum: [ok, error] }
+            sandbox_pool: { type: string, enum: [ok, error] }
+        timestamp: { type: string, format: date-time }
+
+    TaskStats:
+      type: object
+      properties:
+        pending: { type: integer }
+        running: { type: integer }
+        completed_last_hour: { type: integer }
+        failed_last_hour: { type: integer }
+        avg_processing_time_ms: { type: integer }
+        queue_depth: { type: integer }
+        active_workers: { type: integer }
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
