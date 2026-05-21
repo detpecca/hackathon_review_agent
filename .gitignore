@@ -53,6 +53,9 @@ uploads_data/
 # Uploads
 uploads/
 
+# Claude Code
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
